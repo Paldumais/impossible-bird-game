@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Flappy Bird</title>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+        /* Basic styles to make the game look good and centered */
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            width: 100%;
+            overflow: hidden;
+            font-family: 'Press Start 2P', cursive;
+            background-color: #1a1a1a;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* Canvas styling */
+        canvas {
+            /* The background color is now drawn in the canvas for the gradient effect */
+            display: block;
+            border-radius: 8px;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.2), 0 6px 6px rgba(0,0,0,0.25);
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        // --- Game Setup ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Set a fixed internal resolution for the game
+        const gameWidth = 320;
+        const gameHeight = 480;
+        canvas.width = gameWidth;
+        canvas.height = gameHeight;
+
+        // --- Game Variables & Constants ---
+        let bird, pipes, score, gameState, frameCount, groundOffset;
+        let shakeDuration = 0;
+        const SHAKE_MAGNITUDE = 4;
+        const GROUND_HEIGHT = 50;
+
+        const GRAVITY = 0.5;
+        const FLAP_STRENGTH = -8;
+        const BIRD_WIDTH = 34;
+        const BIRD_HEIGHT = 24;
+        
+        const PIPE_WIDTH = 52;
+        const PIPE_GAP = 120; // Increased gap for better playability
+        const PIPE_SPEED = 2.5;
+        const PIPE_INTERVAL = 100; // Frames between new pipes
+
+        // Sound effects object, initialized with mock functions to prevent errors
+        let synth = {
+            flap: { triggerAttackRelease: () => {} },
+            score: { triggerAttackRelease: () => {} },
+            hit: { triggerAttackRelease: () => {} }
+        };
+
+        // --- Game Logic ---
+        function resetGame() {
+            bird = {
+                x: 60,
+                y: canvas.height / 2.5,
+                velocity: 0,
+                rotation: 0
+            };
+            pipes = [];
+            score = 0;
+            frameCount = 0;
+            groundOffset = 0;
+            gameState = 'start';
+            // Generate the first pipe far off-screen
+            frameCount = PIPE_INTERVAL; // This will trigger a pipe generation on the first frame of play
+        }
+
+        function generatePipe() {
+            const topPipeHeight = Math.floor(Math.random() * (canvas.height - GROUND_HEIGHT - PIPE_GAP - 80)) + 40;
+            pipes.push({
+                x: canvas.width,
+                y: 0,
+                width: PIPE_WIDTH,
+                height: topPipeHeight,
+                passed: false
+            });
+            pipes.push({
+                x: canvas.width,
+                y: topPipeHeight + PIPE_GAP,
+                width: PIPE_WIDTH,
+                height: canvas.height - topPipeHeight - PIPE_GAP - GROUND_HEIGHT,
+                passed: true // Only the top pipe is checked for scoring
+            });
+        }
+
+        function flap() {
+            if (gameState === 'playing') {
+                bird.velocity = FLAP_STRENGTH;
+                synth.flap.triggerAttackRelease('C5', '8n');
+            } else if (gameState === 'start' || gameState === 'over') {
+                resetGame();
+                gameState = 'playing';
+                synth.flap.triggerAttackRelease('C5', '8n');
+            }
+        }
+
+        function update() {
+            if (gameState !== 'playing') return;
+
+            // Update ground
+            groundOffset = (groundOffset - PIPE_SPEED) % 24; // 24 is width of ground pattern segment
+
+            // Update bird
+            bird.velocity += GRAVITY;
+            bird.y += bird.velocity;
+            // Bird rotation for animation
+            bird.rotation = Math.min(Math.max(-0.5, bird.velocity * 0.05), 1.0);
+
+            // Collision with ground
+            if (bird.y + BIRD_HEIGHT > canvas.height - GROUND_HEIGHT) {
+                bird.y = canvas.height - GROUND_HEIGHT - BIRD_HEIGHT;
+                bird.velocity = 0;
+                endGame();
+            }
+            // Collision with ceiling
+            if (bird.y < 0) {
+                bird.y = 0;
+                bird.velocity = 0;
+                endGame();
+            }
+
+            // Update pipes
+            frameCount++;
+            if (frameCount >= PIPE_INTERVAL) {
+                generatePipe();
+                frameCount = 0;
+            }
+
+            for (let i = pipes.length - 1; i >= 0; i--) {
+                const pipe = pipes[i];
+                pipe.x -= PIPE_SPEED;
+
+                // Collision with pipes
+                if (
+                    bird.x < pipe.x + pipe.width &&
+                    bird.x + BIRD_WIDTH > pipe.x &&
+                    bird.y < pipe.y + pipe.height &&
+                    bird.y + BIRD_HEIGHT > pipe.y
+                ) {
+                    endGame();
+                }
+
+                // Update score
+                if (!pipe.passed && pipe.x + pipe.width < bird.x) {
+                    score++;
+                    pipe.passed = true;
+                    synth.score.triggerAttackRelease('E6', '8n');
+                }
+
+                // Remove off-screen pipes
+                if (pipe.x + pipe.width < 0) {
+                    pipes.splice(i, 2); // Remove both top and bottom pipe pair
+                    i--; // Decrement i since we removed two elements
+                }
+            }
+        }
+
+        function endGame() {
+            if (gameState === 'over') return;
+            gameState = 'over';
+            synth.hit.triggerAttackRelease('C4', '4n');
+            shakeDuration = 15; // Set shake for 15 frames
+        }
+
+
+        // --- Drawing ---
+        function draw() {
+            ctx.save();
+             // Screen Shake Effect
+            if (shakeDuration > 0) {
+                const dx = (Math.random() - 0.5) * SHAKE_MAGNITUDE;
+                const dy = (Math.random() - 0.5) * SHAKE_MAGNITUDE;
+                ctx.translate(dx, dy);
+                shakeDuration--;
+            }
+
+            // Draw sky gradient
+            const bgGradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            bgGradient.addColorStop(0, '#87CEEB');
+            bgGradient.addColorStop(1, '#BFEFFF');
+            ctx.fillStyle = bgGradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw pipes
+            pipes.forEach(pipe => {
+                const pipeGradient = ctx.createLinearGradient(pipe.x, 0, pipe.x + pipe.width, 0);
+                pipeGradient.addColorStop(0, '#55823d');
+                pipeGradient.addColorStop(1, '#82d163');
+                ctx.fillStyle = pipeGradient;
+                ctx.strokeStyle = '#3e612d';
+                ctx.lineWidth = 3;
+                
+                // Pipe body
+                ctx.fillRect(pipe.x, pipe.y, pipe.width, pipe.height);
+                ctx.strokeRect(pipe.x, pipe.y, pipe.width, pipe.height);
+                
+                // Pipe cap for detail
+                ctx.fillRect(pipe.x - 5, pipe.y + (pipe.y === 0 ? pipe.height - 20 : 0) , pipe.width + 10, 20);
+                ctx.strokeRect(pipe.x - 5, pipe.y + (pipe.y === 0 ? pipe.height - 20 : 0) , pipe.width + 10, 20);
+            });
+
+            // Draw scrolling ground
+            for (let i = 0; i < Math.ceil(canvas.width / 24) + 1; i++) {
+                ctx.fillStyle = (i % 2 === 0) ? '#e6d6a0' : '#d4c18e';
+                ctx.fillRect(groundOffset + i * 24, canvas.height - GROUND_HEIGHT, 24, GROUND_HEIGHT);
+            }
+            ctx.fillStyle = '#6b5a38';
+            ctx.fillRect(0, canvas.height - GROUND_HEIGHT, canvas.width, 5);
+
+
+            // Draw bird
+            ctx.save();
+            ctx.translate(bird.x + BIRD_WIDTH / 2, bird.y + BIRD_HEIGHT / 2);
+            ctx.rotate(bird.rotation);
+            // Bird body
+            ctx.fillStyle = '#FFD700';
+            ctx.beginPath();
+            ctx.roundRect(-BIRD_WIDTH / 2, -BIRD_HEIGHT / 2, BIRD_WIDTH, BIRD_HEIGHT, [12, 12, 12, 0]);
+            ctx.fill();
+            // Bird wing
+            ctx.fillStyle = '#FFA500';
+            const wingX = -BIRD_WIDTH/4;
+            const wingY = -BIRD_HEIGHT/2;
+            const wingFlap = Math.sin(Date.now() * 0.02) * 5;
+            ctx.beginPath();
+            ctx.moveTo(wingX, wingY);
+            ctx.quadraticCurveTo(wingX + 10, wingY + wingFlap, wingX + 20, wingY + 10);
+            ctx.quadraticCurveTo(wingX + 5, wingY + 15, wingX, wingY + 10);
+            ctx.closePath();
+            ctx.fill();
+            // Bird eye
+            ctx.fillStyle = '#000';
+            ctx.beginPath();
+            ctx.arc(BIRD_WIDTH / 4, -BIRD_HEIGHT / 8, 3, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+
+            // Draw UI
+            ctx.fillStyle = 'white';
+            ctx.strokeStyle = 'black';
+            ctx.lineWidth = 3;
+
+            if (gameState === 'playing') {
+                ctx.font = '40px "Press Start 2P"';
+                ctx.textAlign = 'center';
+                ctx.strokeText(score, canvas.width / 2, 60);
+                ctx.fillText(score, canvas.width / 2, 60);
+            } else if (gameState === 'start') {
+                drawUIPanel('Flappy Bird', 'Click or Tap', 'to Start');
+            } else if (gameState === 'over') {
+                drawUIPanel('Game Over', `Score: ${score}`, 'Click to Retry');
+            }
+            ctx.restore();
+        }
+
+        function drawUIPanel(title, text1, text2) {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+            ctx.roundRect(canvas.width/2 - 125, canvas.height/2 - 100, 250, 200, 15);
+            ctx.fill();
+
+            ctx.fillStyle = 'white';
+            ctx.font = '24px "Press Start 2P"';
+            ctx.textAlign = 'center';
+            ctx.strokeText(title, canvas.width / 2, canvas.height / 2 - 50);
+            ctx.fillText(title, canvas.width / 2, canvas.height / 2 - 50);
+
+            ctx.font = '14px "Press Start 2P"';
+            ctx.strokeText(text1, canvas.width / 2, canvas.height / 2);
+            ctx.fillText(text1, canvas.width / 2, canvas.height / 2);
+
+            ctx.strokeText(text2, canvas.width / 2, canvas.height / 2 + 30);
+            ctx.fillText(text2, canvas.width / 2, canvas.height / 2 + 30);
+        }
+
+        // --- Game Loop ---
+        function gameLoop() {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // --- Event Listeners ---
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') flap();
+        });
+        canvas.addEventListener('mousedown', flap);
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault(); // Prevent screen zoom on mobile
+            flap();
+        });
+
+        // --- Tone.js library for sound ---
+        const toneScript = document.createElement('script');
+        toneScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.min.js';
+        toneScript.onload = () => {
+            const startAudio = () => {
+                Tone.start();
+                synth.flap = new Tone.Synth({ oscillator: { type: 'sine' }, envelope: { attack: 0.01, decay: 0.1, sustain: 0.2, release: 0.1 } }).toDestination();
+                synth.score = new Tone.Synth({ oscillator: { type: 'triangle' }, envelope: { attack: 0.01, decay: 0.1, sustain: 0.1, release: 0.1 } }).toDestination();
+                synth.hit = new Tone.Synth({ oscillator: { type: 'square' }, envelope: { attack: 0.01, decay: 0.2, sustain: 0.1, release: 0.2 } }).toDestination();
+                document.body.removeEventListener('mousedown', startAudio);
+                document.body.removeEventListener('keydown', startAudio);
+                document.body.removeEventListener('touchstart', startAudio);
+            };
+            document.body.addEventListener('mousedown', startAudio);
+            document.body.addEventListener('keydown', startAudio);
+            document.body.addEventListener('touchstart', startAudio);
+        };
+        document.head.appendChild(toneScript);
+
+
+        // --- Start the game ---
+        resetGame();
+        gameLoop();
+
+    </script>
+</body>
+</html>
+
